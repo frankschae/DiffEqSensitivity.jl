@@ -55,6 +55,7 @@ Base.@pure function QuadratureAdjoint(;chunk_size=0,autodiff=true,
 end
 
 struct TrackerAdjoint <: AbstractAdjointSensitivityAlgorithm{nothing,true,nothing} end
+struct ReverseDiffAdjoint <: AbstractAdjointSensitivityAlgorithm{nothing,true,nothing} end
 struct ZygoteAdjoint <: AbstractAdjointSensitivityAlgorithm{nothing,true,nothing} end
 
 abstract type VJPChoice end
