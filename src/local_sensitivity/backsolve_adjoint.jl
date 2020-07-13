@@ -138,8 +138,7 @@ end
 @noinline function SDEAdjointProblem(sol,sensealg::BacksolveAdjoint,
                                      g,t=nothing,dg=nothing;
                                      checkpoints=sol.t,
-                                     callback=CallbackSet(),
-                                     diffusion_jac=nothing, diffusion_paramjac=nothing,kwargs...)
+                                     callback=CallbackSet(),kwargs...)
   @unpack f, p, u0, tspan = sol.prob
   tspan = reverse(tspan)
   discrete = t != nothing
@@ -152,9 +151,21 @@ end
   len = length(u0)+numparams
   λ = similar(p, len)
 
-  sense_drift = ODEBacksolveSensitivityFunction(g,sensealg,discrete,sol,dg,sol.prob.f)
+  if StochasticDiffEq.alg_interpretation(sol.alg) == :Stratonovich
+    sense_drift = ODEBacksolveSensitivityFunction(g,sensealg,discrete,sol,dg,sol.prob.f)
+  else
+    sys = ModelingToolkit.modelingtoolkitize(sol.prob)
+    sys2 = ModelingToolkit.stochastic_integral_transform(sys,-1)
+    if isinplace(sol.prob)
+      fdrift = ModelingToolkit.eval(ModelingToolkit.generate_function(sys2)[2])
+    else
+      fdrift = ModelingToolkit.eval(ModelingToolkit.generate_function(sys2)[1])
+    end
+    drift_function = ODEFunction(fdrift, mass_matrix=sol.prob.f.mass_matrix, analytic=sol.prob.f.analytic, tgrad=sol.prob.f.tgrad, jac=sol.prob.f.jac, jvp=sol.prob.f.jvp, vjp=sol.prob.f.vjp, jac_prototype=sol.prob.f.jac_prototype, sparsity=sol.prob.f.sparsity, Wfact=sol.prob.f.Wfact, Wfact_t=sol.prob.f.Wfact_t, paramjac=sol.prob.f.paramjac, syms=sol.prob.f.syms, colorvec=sol.prob.f.colorvec)
+    sense_drift = ODEBacksolveSensitivityFunction(g,sensealg,discrete,sol,dg,drift_function)
+  end
 
-  diffusion_function = ODEFunction(sol.prob.g, jac=diffusion_jac, paramjac=diffusion_paramjac)
+  diffusion_function = ODEFunction(sol.prob.g)
   sense_diffusion = ODEBacksolveSensitivityFunction(g,sensealg,discrete,sol,dg,diffusion_function;noiseterm=true)
 
   init_cb = t !== nothing && tspan[1] == t[end]

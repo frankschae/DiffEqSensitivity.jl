@@ -8,6 +8,7 @@ using FFTW, Distributions, Requires
 using StochasticDiffEq
 import DiffEqNoiseProcess
 import ZygoteRules, Zygote, ReverseDiff
+import ModelingToolkit
 
 abstract type SensitivityFunction end
 abstract type GSAMethod end

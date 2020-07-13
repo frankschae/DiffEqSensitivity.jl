@@ -29,7 +29,7 @@ p2 = [1.01,0.87]
 
 
 # scalar noise
-@testset "SDE scalar noise tests" begin
+@testset "Stratonovich SDE scalar noise tests" begin
   using DiffEqNoiseProcess
 
   f!(du,u,p,t) = (du .= p[1]*u)
@@ -79,3 +79,112 @@ p2 = [1.01,0.87]
   @test isapprox(compute_grads(sol, u0[2]/u0[1])[1], res_sde_u0, rtol=1e-4)
 
 end
+
+
+
+# scalar noise
+@testset "Ito SDE scalar noise tests" begin
+  using DiffEqNoiseProcess
+
+  f!(du,u,p,t) = (du .= p[1]*u)
+  σ!(du,u,p,t) = (du .= p[2]*u)
+
+  @info "scalar SDE"
+
+  Random.seed!(seed)
+  W = WienerProcess(0.0,0.0,0.0)
+  u0 = rand(2)
+
+  linear_analytic(u0,p,t,W) = @.(u0*exp((p[1]-p[2]^2/2)*t+p[2]*W))
+
+  prob = SDEProblem(SDEFunction(f!,σ!,analytic=linear_analytic),σ!,u0,trange,p2,
+    noise=W
+    )
+  sol = solve(prob,SOSRI(), dt=tend/1e2, save_noise=true)
+
+  @test isapprox(sol.u_analytic,sol.u, atol=1e-4)
+
+  Random.seed!(seed)
+  res_sde_u0, res_sde_p = adjoint_sensitivities(sol,EulerHeun(),dg!,Array(t)
+    ,dt=tend/1e2,adaptive=false,sensealg=BacksolveAdjoint())
+
+  @show res_sde_u0, res_sde_p
+
+  res_sde_u02, res_sde_p2 = adjoint_sensitivities(sol,EulerHeun(),dg!,Array(t)
+    ,dt=tend/1e2,adaptive=false,sensealg=InterpolatingAdjoint())
+
+
+  function compute_grads(sol, scale=1.0)
+    xdis = sol(tarray)
+    helpu1 = [u[1] for u in xdis.u]
+    tmp1 = sum((@. xdis.t*helpu1*helpu1))
+
+    Wtmp = [sol.W(t)[1][1] for t in tarray]
+    tmp2 = sum((@. Wtmp*helpu1*helpu1))
+
+    tmp3 = sum((@. helpu1*helpu1))/helpu1[1]
+
+    return [tmp3, scale*tmp3], [tmp1*(1.0+scale^2), tmp2*(1.0+scale^2)]
+  end
+
+  @test isapprox(res_sde_u0, res_sde_u02,  rtol=1e-4)
+  @test isapprox(res_sde_p, res_sde_p2,  atol=1e-4)
+  @test isapprox(compute_grads(sol, u0[2]/u0[1])[2], res_sde_p', atol=1e-4)
+  @test isapprox(compute_grads(sol, u0[2]/u0[1])[1], res_sde_u0, rtol=1e-4)
+
+end
+
+
+using DiffEqNoiseProcess
+
+f!(du,u,p,t) = (du .= p[1]*u)
+σ!(du,u,p,t) = (du .= p[2]*u)
+
+@info "scalar SDE"
+prob.f
+Random.seed!(seed)
+W = WienerProcess(0.0,0.0,0.0)
+u0 = rand(2)
+
+linear_analytic(u0,p,t,W) = @.(u0*exp((p[1]-p[2]^2/2)*t+p[2]*W))
+
+prob = SDEProblem(SDEFunction(f!,σ!,analytic=linear_analytic),σ!,u0,trange,p2,
+  noise=W
+  )
+sol = solve(prob,SOSRI(), dt=tend/1e2, save_noise=true)
+
+@test isapprox(sol.u_analytic,sol.u, atol=1e-4)
+
+res_sde_u0, res_sde_p = adjoint_sensitivities(sol,EM(),dg!,Array(t),dt=tend/1e2,adaptive=false,sensealg=BacksolveAdjoint())
+
+
+using ModelingToolkit
+sys = modelingtoolkitize(prob)
+sys2 = stochastic_integral_transform(sys,-1)
+fdrift = generate_function(sys2)[1]
+ODEFunction(fdrift, mass_matrix=prob.f.mass_matrix, analytic=prob.f.analytic, tgrad=prob.f.tgrad, jac=prob.f.jac, jvp=prob.f.jvp, vjp=prob.f.vjp, jac_prototype=prob.f.jac_prototype, sparsity=prob.f.sparsity, paramjac=prob.f.paramjac, colorvec=prob.f.colorvec)
+prob′ = SDEProblem(sys2, prob.u0, prob.tspan, parammap=prob.p)
+
+@show res_sde_u0, res_sde_p
+
+res_sde_u02, res_sde_p2 = adjoint_sensitivities(sol,EM(),dg!,Array(t)
+  ,dt=tend/1e2,adaptive=false,sensealg=InterpolatingAdjoint())
+
+
+function compute_grads(sol, scale=1.0)
+  xdis = sol(tarray)
+  helpu1 = [u[1] for u in xdis.u]
+  tmp1 = sum((@. xdis.t*helpu1*helpu1))
+
+  Wtmp = [sol.W(t)[1][1] for t in tarray]
+  tmp2 = sum((@. Wtmp*helpu1*helpu1))
+
+  tmp3 = sum((@. helpu1*helpu1))/helpu1[1]
+
+  return [tmp3, scale*tmp3], [tmp1*(1.0+scale^2), tmp2*(1.0+scale^2)]
+end
+
+@test isapprox(res_sde_u0, res_sde_u02,  rtol=1e-4)
+@test isapprox(res_sde_p, res_sde_p2,  atol=1e-4)
+@test isapprox(compute_grads(sol, u0[2]/u0[1])[2], res_sde_p', atol=1e-4)
+@test isapprox(compute_grads(sol, u0[2]/u0[1])[1], res_sde_u0, rtol=1e-4)
