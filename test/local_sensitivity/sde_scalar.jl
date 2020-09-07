@@ -212,3 +212,98 @@ end
   @test isapprox(true_grads[1], res_sde_u02, rtol=1e-4)
 
 end
+
+
+@testset "NoiseGrid: SDE oop scalar" begin
+  using DiffEqNoiseProcess
+
+  dtscalar = tend/1e2
+
+  f(u,p,t) = p[1]*u
+  σ(u,p,t) = p[2]*u
+
+  Random.seed!(seed)
+  s = tstart:dtscalar:tend
+  Z = randn(length(s))
+  Z1 = cumsum([0;sqrt(dtscalar)*Z[1:end-1]])
+  NG = NoiseGrid(s,[[Z] for Z in Z1])
+  u0 = rand(2)
+
+  linear_analytic_strat(u0,p,t,W) = @.(u0*exp(p[1]*t+p[2]*W))
+
+  prob = SDEProblem(SDEFunction(f,σ,analytic=linear_analytic_strat),σ,u0,trange,p2,
+    noise=NG
+   )
+  sol = solve(prob,EulerHeun(), dt=dtscalar, save_noise=true)
+
+  @test isapprox(sol.u_analytic,sol.u, atol=1e-4)
+
+  res_sde_u0, res_sde_p = adjoint_sensitivities(sol,EulerHeun(),dg!,Array(t)
+    ,dt=dtscalar,adaptive=false,sensealg=BacksolveAdjoint())
+
+  @show res_sde_u0, res_sde_p
+
+  res_sde_u02, res_sde_p2 = adjoint_sensitivities(sol,EulerHeun(),dg!,Array(t)
+    ,dt=tend/1e2,adaptive=false,sensealg=InterpolatingAdjoint())
+
+
+  @test isapprox(res_sde_u0, res_sde_u02,  rtol=1e-4)
+  @test isapprox(res_sde_p, res_sde_p2,  atol=1e-4)
+
+  @show res_sde_u02, res_sde_p2
+
+  function compute_grads(sol, scale=1.0)
+    _sol = deepcopy(sol)
+    _sol.W.save_everystep = false
+    xdis = _sol(tarray)
+    helpu1 = [u[1] for u in xdis.u]
+    tmp1 = sum((@. xdis.t*helpu1*helpu1))
+
+    Wtmp = [_sol.W(t)[1][1] for t in tarray]
+    tmp2 = sum((@. Wtmp*helpu1*helpu1))
+
+    tmp3 = sum((@. helpu1*helpu1))/helpu1[1]
+
+    return [tmp3, scale*tmp3], [tmp1*(1.0+scale^2), tmp2*(1.0+scale^2)]
+  end
+
+  true_grads = compute_grads(sol, u0[2]/u0[1])
+
+  @show  true_grads
+
+  @test isapprox(true_grads[2], res_sde_p', atol=1e-4)
+  @test isapprox(true_grads[1], res_sde_u0, rtol=1e-4)
+  @test isapprox(true_grads[2], res_sde_p2', atol=1e-4)
+  @test isapprox(true_grads[1], res_sde_u02, rtol=1e-4)
+end
+
+
+using DiffEqNoiseProcess
+
+dtscalar = tend/1e2
+
+f(u,p,t) = p[1]*u
+σ(u,p,t) = p[2]*u
+
+Random.seed!(seed)
+s = tstart:dtscalar:tend
+Z = randn(length(s))
+Z1 = cumsum([0;sqrt(dtscalar)*Z[1:end-1]])
+NG = NoiseGrid(s,[[Z] for Z in Z1])
+u0 = rand(2)
+
+linear_analytic_strat(u0,p,t,W) = @.(u0*exp(p[1]*t+p[2]*W))
+
+prob = SDEProblem(
+  SDEFunction(f,σ,analytic=linear_analytic_strat),
+  #f,
+  σ,u0,trange,p2
+  , noise=NG
+ )
+sol = solve(prob,EulerHeun(), dt=dtscalar, save_noise=true)
+
+@test isapprox(sol.u_analytic,sol.u, atol=1e-3)
+
+
+res_sde_u0, res_sde_p = adjoint_sensitivities(sol,EulerHeun(),dg!,Array(t)
+  ,dt=dtscalar,adaptive=false,sensealg=BacksolveAdjoint())
